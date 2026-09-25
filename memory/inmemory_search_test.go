@@ -190,6 +190,86 @@ func Test_inMemoryService_SearchMemory_NonASCII(t *testing.T) {
 	}
 }
 
+// Test_inMemoryService_SearchMemory_PunctuationAndWhitespace pins tokenizing on
+// any run of non-word characters: punctuation on either side of a word, any
+// whitespace not just a single space, and punctuation inside a token all act as
+// separators, as adk-python's "\w+" tokenization does. Every case but the last
+// returns zero without the fix.
+func Test_inMemoryService_SearchMemory_PunctuationAndWhitespace(t *testing.T) {
+	for _, tt := range []struct {
+		name  string
+		text  string
+		query string
+		want  int
+	}{
+		{
+			name:  "trailing punctuation on the stored word",
+			text:  "The agent works great!",
+			query: "great",
+			want:  1,
+		},
+		{
+			name:  "leading and trailing punctuation on the stored word",
+			text:  "(parenthesized) value",
+			query: "parenthesized",
+			want:  1,
+		},
+		{
+			name:  "punctuation on the query side",
+			text:  "the great idea",
+			query: "great!",
+			want:  1,
+		},
+		{
+			name:  "colon on the stored word",
+			text:  "score: 100",
+			query: "score",
+			want:  1,
+		},
+		{
+			name:  "newline separates words",
+			text:  "one two\nthree four",
+			query: "three",
+			want:  1,
+		},
+		{
+			name:  "tab separates words",
+			text:  "one two\tthree four",
+			query: "three",
+			want:  1,
+		},
+		{
+			name:  "punctuation inside a token splits it",
+			text:  "regions: us-east1,us-west1",
+			query: "west1",
+			want:  1,
+		},
+		// Trimming a punctuation rune off a query still requires a whole-word
+		// match: an ASCII word is not reached by a substring.
+		{
+			name:  "query punctuation is not a partial match",
+			text:  "great",
+			query: "grea?",
+			want:  0,
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			s := memory.InMemoryService()
+			e := memoryTextEvent("event", tt.text)
+			if err := s.AddSessionToMemory(t.Context(), makeSession(t, "app", "user", "session", []*session.Event{e})); err != nil {
+				t.Fatal(err)
+			}
+			got, err := s.SearchMemory(t.Context(), &memory.SearchRequest{AppName: "app", UserID: "user", Query: tt.query})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(got.Memories) != tt.want {
+				t.Fatalf("SearchMemory() returned %d entries, want %d", len(got.Memories), tt.want)
+			}
+		})
+	}
+}
+
 func memoryTextEvent(id string, texts ...string) *session.Event {
 	var parts []*genai.Part
 	for _, text := range texts {

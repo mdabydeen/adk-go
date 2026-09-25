@@ -199,15 +199,30 @@ func (s *inMemoryService) SearchMemory(ctx context.Context, req *SearchRequest) 
 	return res, nil
 }
 
+// extractWords returns the distinct lowercased words in text.
+//
+// Words are separated on any run of non-word characters, so punctuation ("):",
+// "!", "\t", "\n" and so on) is not folded into a token: "works great!" and
+// "regions: us-east1,us-west1" index "great", "us", "east1", "us", "west1",
+// and a search for "great" or "west1" reaches them. This matches the "\w+"
+// tokenization that adk-python's in-memory service uses. Both the stored index
+// and a query are tokenized the same way, so the two sides stay in agreement.
+//
+// Only word characters survive: a letter, a number, or an underscore. Anything
+// else, in any run, is a separator, including the punctuation inside a hyphenated
+// token, so "us-east1" splits into "us" and "east1" rather than staying whole.
 func extractWords(text string) map[string]struct{} {
 	res := make(map[string]struct{})
-
-	for s := range strings.SplitSeq(text, " ") {
-		if s == "" {
-			continue
-		}
-		res[strings.ToLower(s)] = struct{}{}
+	for _, word := range strings.FieldsFunc(text, isNotWord) {
+		res[strings.ToLower(word)] = struct{}{}
 	}
 
 	return res
+}
+
+// isNotWord reports whether r separates two words: it is a separator unless it is
+// a letter, a number, or an underscore. The underscore is excluded so that an
+// identifier such as "user_name" stays one token, matching "\w+".
+func isNotWord(r rune) bool {
+	return !unicode.IsLetter(r) && !unicode.IsNumber(r) && r != '_'
 }
